@@ -1,0 +1,121 @@
+/* Overall page styling */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+    background-color: #0f172a;
+    color: #e2e8f0;
+}
+
+/* Top navigation bar */
+.navbar {
+    background-color: #1e293b;
+    padding: 15px 30px;
+    display: flex;
+    align-items: center;
+    border-bottom: 2px solid #38bdf8;
+}
+
+.navbar h1 {
+    margin: 0;
+    color: #38bdf8;
+    font-size: 22px;
+}
+
+.navbar a {
+    color: #e2e8f0;
+    text-decoration: none;
+    margin-left: 30px;
+    font-size: 15px;
+}
+
+.navbar a:hover {
+    color: #38bdf8;
+}
+
+/* Main content area */
+.container {
+    padding: 30px;
+}
+
+/* Info cards at the top */
+.cards {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.card {
+    background-color: #1e293b;
+    border-radius: 10px;
+    padding: 20px 30px;
+    flex: 1;
+    border-left: 4px solid #38bdf8;
+}
+
+.card h2 {
+    margin: 0;
+    font-size: 36px;
+    color: #38bdf8;
+}
+
+.card p {
+    margin: 5px 0 0 0;
+    color: #94a3b8;
+    font-size: 14px;
+}
+
+/* Device table */
+.table-container {
+    background-color: #1e293b;
+    border-radius: 10px;
+    padding: 20px;
+}
+
+.table-container h2 {
+    margin-top: 0;
+    color: #38bdf8;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th {
+    background-color: #0f172a;
+    color: #38bdf8;
+    padding: 12px 15px;
+    text-align: left;
+    font-size: 13px;
+    text-transform: uppercase;
+}
+
+td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #334155;
+    font-size: 14px;
+    color: #e2e8f0;
+}
+
+tr:hover {
+    background-color: #334155;
+}
+
+/* Status badge */
+.badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.badge-online {
+    background-color: #064e3b;
+    color: #34d399;
+}
+
+.badge-offline {
+    background-color: #4c0519;
+    color: #f87171;
+}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Welcome to your Network Dashboard 👋</h2>
+<p style="color: #94a3b8;">Monitor all devices connected to your network in real time.</p>
+
+<div class="cards">
+    <div class="card">
+        <h2>{{ device_count }}</h2>
+        <p>Devices Online</p>
+    </div>
+    <div class="card">
+        <h2>🟢</h2>
+        <p>Network Status: Active</p>
+    </div>
+    <div class="card">
+        <h2>🔒</h2>
+        <p>Monitoring Active</p>
+    </div>
+</div>
+
+<a href="/devices" style="
+    background-color: #38bdf8;
+    color: #0f172a;
+    padding: 10px 20px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: bold;
+">View All Devices →</a>
+
+{% endblock %}
