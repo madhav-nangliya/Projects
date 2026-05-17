@@ -1,6 +1,11 @@
 import nmap
 import socket
 
+# List of known trusted devices (their IPs)
+# We'll update this automatically as devices are seen
+known_devices = set()
+alert_log = []
+
  #Gets your own IP Address
 def get_local_ip():
     hostname = socket.gethostname()#Gets your computer's name
@@ -76,6 +81,35 @@ def display_devices(devices):
 It means "only run this code if you directly run this file". 
 When we import this scanner into our web app,
  we don't want it to automatically start scanning — this line prevents that.'''
+
+def check_for_alerts(devices):
+    global known_devices
+    global alert_log
+
+    new_alerts = []
+
+    for device in devices:
+        ip = device['ip']
+
+        # If we've never seen this device before — it's an alert!
+        if ip not in known_devices:
+            if len(known_devices) > 0:  # Don't alert on first scan
+                alert = {
+                    'ip': ip,
+                    'hostname': device['hostname'],
+                    'message': f"Unknown device detected: {ip}"
+                }
+                new_alerts.append(alert)
+                alert_log.append(alert)
+                print(f"🚨 ALERT: New device detected — {ip}")
+
+            # Add to known devices
+            known_devices.add(ip)
+
+    return new_alerts
+
+def get_alerts():
+    return alert_log
 
 if __name__ == "__main__":
     devices = scan_network()

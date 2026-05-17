@@ -3,7 +3,7 @@
 {% block content %}
 
 <div class="table-container">
-    <h2>Connected Devices</h2>
+    <h2>Connected Devices <span id="last-updated" style="font-size:13px; color:#94a3b8;"></span></h2>
 
     <table>
         <tr>
@@ -12,19 +12,58 @@
             <th>MAC Address</th>
             <th>Status</th>
         </tr>
-
-        {% for device in devices %}
-        <tr>
-            <td>{{ device.ip }}</td>
-            <td>{{ device.hostname }}</td>
-            <td>{{ device.mac }}</td>
-            <td>
-                <span class="badge badge-online">● Online</span>
-            </td>
-        </tr>
-        {% endfor %}
-
+        <tbody id="device-table-body">
+            {% for device in devices %}
+            <tr>
+                <td>{{ device.ip }}</td>
+                <td>{{ device.hostname }}</td>
+                <td>{{ device.mac }}</td>
+                <td><span class="badge badge-online">● Online</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
     </table>
 </div>
+
+<!-- JavaScript for auto-refresh -->
+<script>
+    // This function fetches fresh device data every 30 seconds
+    function refreshDevices() {
+        // Call our JSON API
+        fetch('/api/devices')
+            .then(response => response.json())
+            .then(devices => {
+
+                // Get the table body element
+                let tableBody = document.getElementById('device-table-body');
+
+                // Clear existing rows
+                tableBody.innerHTML = '';
+
+                // Add a new row for each device
+                devices.forEach(device => {
+                    tableBody.innerHTML += `
+                        <tr>
+                            <td>${device.ip}</td>
+                            <td>${device.hostname}</td>
+                            <td>${device.mac}</td>
+                            <td><span class="badge badge-online">● Online</span></td>
+                        </tr>
+                    `;
+                });
+
+                // Update last refreshed time
+                let now = new Date();
+                document.getElementById('last-updated').textContent = 
+                    `Last updated: ${now.toLocaleTimeString()}`;
+            });
+    }
+
+    // Run immediately when page loads
+    refreshDevices();
+
+    // Then run every 30 seconds automatically
+    setInterval(refreshDevices, 30000);
+</script>
 
 {% endblock %}

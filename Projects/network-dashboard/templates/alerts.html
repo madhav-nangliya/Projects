@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="table-container">
+    <h2>🚨 Alert Log</h2>
+
+    {% if alerts %}
+    <table>
+        <tr>
+            <th>IP Address</th>
+            <th>Hostname</th>
+            <th>Message</th>
+        </tr>
+        {% for alert in alerts %}
+        <tr>
+            <td>{{ alert.ip }}</td>
+            <td>{{ alert.hostname }}</td>
+            <td style="color: #f87171;">{{ alert.message }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    {% else %}
+    <p style="color: #94a3b8;">✅ No alerts detected. Your network looks clean!</p>
+    {% endif %}
+
+</div>
+
+{% endblock %}
