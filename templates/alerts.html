@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- Page Header -->
+<div class="page-header">
+  <div class="breadcrumb">NetWatch / <span>Alerts</span></div>
+  <h2>Alert Log</h2>
+  <p>Unknown or suspicious devices detected on your network</p>
+</div>
+
+<!-- Alerts Panel -->
+<div class="panel">
+
+  <div class="panel-header">
+    <div class="panel-title">
+      <div class="dot" style="background: var(--danger); box-shadow: 0 0 8px var(--danger);"></div>
+      Security Alerts
+    </div>
+    <div class="panel-actions">
+      <!--
+        ✦ BUG FIX: clearAlerts() now calls POST /api/alerts/read-all to persist
+           the dismissal in the DB.  The old version only wiped the DOM, so alerts
+           re-appeared on the next page reload or auto-refresh.
+      -->
+      <button class="btn btn-ghost" onclick="clearAlerts()">🗑️ Clear All</button>
+    </div>
+  </div>
+
+  <!-- Alert rows are rendered server-side on first load (Jinja2 loop below),
+       then replaced by refreshAlerts() every 30 seconds via the API. -->
+  <div id="alerts-container">
+
+    {% if alerts %}
+      {% for alert in alerts %}
+      <!--
+        Each row has  id="alert-N"  so blockFromAlert() can find and dim it
+        immediately after a successful block, without waiting for a refresh.
+      -->
+      <div class="alert-item" id="alert-{{ alert.id }}">
+
+        <!-- Icon changes with severity so critical alerts stand out visually -->
+        <div class="alert-icon-wrap">
+          {% if alert.severity == 'critical' %}🔴
+          {% elif alert.severity == 'warning' %}🟡
+          {% else %}ℹ️
+          {% endif %}
+        </div>
+
+        <div class="alert-content">
+          <!--
+            ✦ BUG FIX: format the alert_type slug for display.
+               'new_device' → 'New Device' etc.
+               Jinja2 replace() + title() filter chain handles this cleanly.
+          -->
+          <div class="alert-title">
+            {{ alert.alert_type | replace('_', ' ') | title }}
+          </div>
+
+          <!--
+            ✦ BUG FIX: original template used  alert.ip  and  alert.hostname
+               which don't exist on the alerts table.
+               Correct DB column names are  device_ip  and  device_name.
+          -->
+          <div class="alert-detail">
+            IP: {{ alert.device_ip }} &nbsp;|&nbsp; {{ alert.device_name }}
+          </div>
+
+          <div class="alert-detail" style="margin-top:3px; color:var(--danger);">
+            {{ alert.message }}
+          </div>
+
+          <!--
+            ✦ BUG FIX: alert.alert_time arrives as a Python datetime from the DB.
+               Render it with Jinja2's  strftime  filter so it shows a readable
+               "26 May 2026, 17:05" instead of the raw datetime repr.
+          -->
+          <div class="alert-detail"
+            style="margin-top:3px; color:var(--text-muted); font-size:11px;">
+            {{ alert.alert_time.strftime('%d %b %Y, %H:%M') if alert.alert_time else '—' }}
+          </div>
+        </div>
+
+        <!--
+          ✦ BUG FIX: was calling  /api/block/${ip}  (GET, non-existent route).
+             Now calls  blockFromAlert(mac, alertId)  which uses the correct
+             POST /api/devices/<mac>/block  endpoint.
+             Pass device_mac (not device_ip) to match the backend route param.
+
+          ✦ Guard: if device_mac is empty/null (some system alerts have no MAC)
+             the button is hidden entirely — calling block with '' would 404.
+        -->
+        {% if alert.device_mac %}
+        <button class="btn"
+          style="padding:6px 14px; font-size:12px; flex-shrink:0;
+            background:var(--danger-bg); color:var(--danger);
+            border:1px solid var(--danger);"
+          ,onclick="blockFromAlert('{{ alert.device_mac }}', {{ alert.id }})">
+          🚫 Block
+        </button>
+        {% endif %}
+
+      </div>
+      {% endfor %}
+
+    {% else %}
+      <!-- Empty state — shown when there are zero alerts in the DB -->
+      <div class="no-alerts" id="no-alerts-msg">
+        <div class="shield">🛡️</div>
+        <h3>All Clear!</h3>
+        <p>No suspicious activity detected.<br>Your network looks clean.</p>
+      </div>
+    {% endif %}
+
+  </div><!-- /#alerts-container -->
+
+  <div class="panel-footer">
+    <div class="update-info">
+      <div class="live-dot"></div>
+      <span id="alerts-updated">Monitoring active</span>
+    </div>
+    <span class="next-scan">Auto-checks every 30s</span>
+  </div>
+
+</div><!-- /.panel -->
+
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+
+  // ── Helper: format an ISO datetime string for display ──
+  // The API returns alert_time as an ISO string e.g. "2026-05-26T17:05:01".
+  // This converts it to "26 May 2026, 17:05" to match the Jinja2 template.
+  // ✦ BUG FIX: without this the JS-rendered rows showed raw ISO strings.
+  function formatAlertTime(isoString) {
+    if (!isoString) return '—';
+    const d = new Date(isoString);
+    if (isNaN(d)) return isoString;   // Fall back to raw string if parsing fails
+
+    // Build "26 May 2026, 17:05" using Intl for locale-awareness
+    return d.toLocaleDateString('en-GB', {
+      day:   '2-digit',
+      month: 'short',
+      year:  'numeric',
+    }) + ', ' + d.toLocaleTimeString('en-GB', {
+      hour:   '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+
+  // ── Block a Device from the Alerts Page ──
+  // ✦ BUG FIX: old version called  GET /api/block/${ip}  (route doesn't exist).
+  //   Corrected to  POST /api/devices/<mac>/block  with JSON body { blocked: true }.
+  //   Also accepts alertId so the row can be dimmed immediately for instant feedback.
+  function blockFromAlert(mac, alertId) {
+    // ✦ BUG FIX: guard against a null/empty MAC — some system-generated alerts
+    //   (e.g. "scanner started") have no associated device and device_mac is ''.
+    //   Sending POST /api/devices//block would result in a 404 or route mismatch.
+    if (!mac || mac === 'None') {
+      showToast('No MAC address for this alert', 'error');
+      return;
+    }
+
+    if (!confirm(`Block device ${mac}?`)) return;
+
+    fetch(`/api/devices/${mac}/block`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ blocked: true })
+    })
+      .then(r => r.json())
+      .then(result => {
+        if (result.success) {
+          showToast(`🚫 ${mac} blocked successfully!`, 'success');
+
+          // Dim the alert row and disable the button so the admin gets
+          // instant visual confirmation without waiting for a full refresh
+          const row = document.getElementById(`alert-${alertId}`);
+          if (row) {
+            row.style.opacity = '0.5';
+            const btn = row.querySelector('button');
+            if (btn) {
+              btn.textContent = '✅ Blocked';
+              btn.disabled    = true;
+            }
+          }
+        } else {
+          showToast(`❌ Failed: ${result.message}`, 'error');
+        }
+      })
+      .catch(() => showToast('Block request failed — check connection', 'error'));
+  }
+
+
+  // ── Clear All Alerts ──
+  // ✦ BUG FIX: old version overwrote the DOM only — alerts re-appeared on the
+  //   next auto-refresh because nothing was persisted.
+  //   Now calls  POST /api/alerts/read-all  which sets  is_read=1  for every
+  //   unread alert in the DB.  The DOM is updated only on a confirmed success.
+  function clearAlerts() {
+    if (!confirm('Mark all alerts as read?')) return;
+
+    fetch('/api/alerts/read-all', { method: 'POST' })
+      .then(r => r.json())
+      .then(result => {
+        if (result.success) {
+          showNoAlertsState();
+          showToast(`${result.cleared} alert(s) marked as read`, 'success');
+        } else {
+          showToast('Failed to clear alerts', 'error');
+        }
+      })
+      .catch(() => showToast('Request failed — check connection', 'error'));
+  }
+
+
+  // ── Helper: replace alerts-container with the "All Clear" state ──
+  function showNoAlertsState() {
+    document.getElementById('alerts-container').innerHTML = `
+      <div class="no-alerts" id="no-alerts-msg">
+        <div class="shield">🛡️</div>
+        <h3>All Clear!</h3>
+        <p>No suspicious activity detected.<br>Your network looks clean.</p>
+      </div>`;
+  }
+
+
+  // ── Refresh Alert List from API ──
+  // ✦ BUG FIX: the old version fetched /api/alerts but never used the data
+  //   to update the DOM — it only updated the footer timestamp.  New alerts
+  //   would never appear without a manual page reload.
+  //   Now re-renders the full alert list from the API response on every call.
+  //
+  //   Called on  DOMContentLoaded  (immediate) and every 30 seconds (interval).
+  //
+  //   API response shape:
+  //   { "success": true, "alerts": [ { id, alert_time, alert_type, device_mac,
+  //     device_ip, device_name, message, severity, is_read }, … ], "count": N }
+  function refreshAlerts() {
+    fetch('/api/alerts?limit=200')
+      .then(r => r.json())
+      .then(data => {
+        // Update the footer timestamp regardless of whether rendering succeeds
+        const now = new Date();
+        document.getElementById('alerts-updated').textContent =
+          'Last checked: ' + now.toLocaleTimeString();
+
+        if (!data.success) return;
+
+        const container = document.getElementById('alerts-container');
+
+        if (data.alerts.length === 0) {
+          showNoAlertsState();
+          return;
+        }
+
+        // Re-render all alert rows so newly generated alerts appear immediately
+        container.innerHTML = data.alerts.map(alert => {
+
+          // Choose icon based on severity
+          const icon = alert.severity === 'critical' ? '🔴'
+                     : alert.severity === 'warning'  ? '🟡'
+                     : 'ℹ️';
+
+          // Format alert_type slug: 'new_device' → 'New Device'
+          const typeLabel = (alert.alert_type || '')
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, c => c.toUpperCase());
+
+          // ✦ BUG FIX: format alert_time from ISO string for display
+          const timeLabel = formatAlertTime(alert.alert_time);
+
+          // ✦ BUG FIX: only render block button when a MAC is present
+          const blockBtn = (alert.device_mac && alert.device_mac !== 'None')
+            ? `<button class="btn"
+                 style="padding:6px 14px;font-size:12px;flex-shrink:0;
+                   background:var(--danger-bg);color:var(--danger);
+                   border:1px solid var(--danger);"
+                 onclick="blockFromAlert('${alert.device_mac}', ${alert.id})">
+                 🚫 Block
+               </button>`
+            : '';
+
+          return `
+            <div class="alert-item" id="alert-${alert.id}">
+              <div class="alert-icon-wrap">${icon}</div>
+              <div class="alert-content">
+                <div class="alert-title">${typeLabel}</div>
+                <div class="alert-detail">
+                  IP: ${alert.device_ip || '—'} &nbsp;|&nbsp; ${alert.device_name || '—'}
+                </div>
+                <div class="alert-detail" style="margin-top:3px; color:var(--danger);">
+                  ${alert.message || ''}
+                </div>
+                <div class="alert-detail"
+                  style="margin-top:3px; color:var(--text-muted); font-size:11px;">
+                  ${timeLabel}
+                </div>
+              </div>
+              ${blockBtn}
+            </div>`;
+
+        }).join('');   // .join('') concatenates all row strings into one HTML string
+      })
+      .catch(() => {
+        // Non-fatal — don't spam the user with toast errors on background polls
+        console.warn('Alert refresh failed');
+      });
+  }
+
+
+  // ── Initialisation ──
+  // ✦ BUG FIX: refreshAlerts() was only triggered by setInterval (30s delay).
+  //   That meant on first load only the server-side render was visible, and
+  //   any alerts generated between the initial render and 30 seconds later
+  //   were invisible.  Now also called immediately on DOMContentLoaded.
+  document.addEventListener('DOMContentLoaded', function () {
+    refreshAlerts();                        // Immediate first refresh
+    setInterval(refreshAlerts, 30000);      // Then every 30 seconds
+  });
+
+</script>
+{% endblock %}

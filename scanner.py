@@ -19,7 +19,7 @@ import logging                 # Log scan events to file/console
 import ipaddress               # Parse and validate IP/CIDR ranges
 from datetime import datetime  # Timestamps
 
-# import all database helpers we need
+# ★ Week 4: import all database helpers we need
 from database import (
     upsert_device,
     mark_devices_offline,

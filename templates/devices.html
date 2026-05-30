@@ -55,7 +55,7 @@
 
           <!-- Hostname -->
           <td class="td-hostname">
-            {{ device.hostname.replace('(You)', '').strip() }}
+            {{ device.hostname }}
             {% if device.is_me %}
               <span class="you-badge">YOU</span>
             {% endif %}
@@ -64,8 +64,13 @@
           <td class="td-mono">{{ device.mac }}</td>
 
           <!-- Status Badge -->
+          {#
+            ✦ BUG FIX: was checking  device.blocked  which does not exist in
+               the DB schema.  The correct field name is  device.is_blocked
+               (TINYINT 0/1 set by database.set_device_blocked).
+          #}
           <td>
-            {% if device.blocked %}
+            {% if device.is_blocked %}
               <span class="badge badge-warning">
                 <span class="badge-dot"></span>Blocked
               </span>
@@ -82,13 +87,21 @@
           </td>
 
           <!-- Action Button -->
+          {#
+            ✦ BUG FIX 1: onclick was passing  device.ip  but the backend route
+               is  /api/devices/<mac>/block  — it expects a MAC address, not an IP.
+               Changed to pass  device.mac  instead.
+
+            ✦ BUG FIX 2: also uses  device.is_blocked  (not  device.blocked )
+               to decide which button variant to show.
+          #}
           <td>
             {% if device.is_me or device.is_gateway %}
               <span style="color: var(--text-muted); font-size: 12px;">🔒 Protected</span>
-            {% elif device.blocked %}
+            {% elif device.is_blocked %}
               <button class="btn btn-outline"
                 style="padding: 5px 12px; font-size: 12px;"
-                onclick="unblockDevice('{{ device.ip }}')">
+                onclick="unblockDevice('{{ device.mac }}')">
                 ✅ Unblock
               </button>
             {% else %}
@@ -96,7 +109,7 @@
                 style="padding: 5px 12px; font-size: 12px;
                   background: var(--danger-bg); color: var(--danger);
                   border: 1px solid var(--danger);"
-                onclick="blockDevice('{{ device.ip }}')">
+                onclick="blockDevice('{{ device.mac }}')">
                 🚫 Block
               </button>
             {% endif %}
@@ -125,21 +138,30 @@
 
 {% block scripts %}
 <script>
-  let countdown = 30;
-  let allDevices = [];
+  let countdown  = 30;
+  let allDevices = [];  // Holds the full unfiltered device list for client-side search
 
   // ── Block a Device ──
-  function blockDevice(ip) {
-    if (!confirm(`Block device ${ip}?\n\nThis will cut off all network traffic from this device.`)) return;
+  // ✦ BUG FIX: was calling  GET /api/block/${ip}  which doesn't exist.
+  //   Fixed to:
+  //     • Use the correct route  POST /api/devices/<mac>/block
+  //     • Send method: 'POST' with a JSON body  { blocked: true }
+  //     • Accept a MAC address argument (not IP) matching the backend route param
+  function blockDevice(mac) {
+    if (!confirm(`Block device ${mac}?\n\nThis will cut off all network traffic from this device.`)) return;
 
-    showToast(`Blocking ${ip}...`, 'info');
+    showToast(`Blocking ${mac}...`, 'info');
 
-    fetch(`/api/block/${ip}`)
+    fetch(`/api/devices/${mac}/block`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ blocked: true })   // Tell backend we want to block
+    })
       .then(r => r.json())
       .then(result => {
         if (result.success) {
-          showToast(`${ip} has been blocked!`, 'success');
-          refreshDevices();
+          showToast(`${mac} has been blocked!`, 'success');
+          refreshDevices();   // Reload table so status badge updates
         } else {
           showToast(`Failed: ${result.message}`, 'error');
         }
@@ -148,16 +170,22 @@
   }
 
   // ── Unblock a Device ──
-  function unblockDevice(ip) {
-    if (!confirm(`Unblock device ${ip}?\n\nThis will restore network access for this device.`)) return;
+  // ✦ BUG FIX: same corrections as blockDevice() above — route, method, body,
+  //   and argument type changed from IP to MAC.
+  function unblockDevice(mac) {
+    if (!confirm(`Unblock device ${mac}?\n\nThis will restore network access for this device.`)) return;
 
-    showToast(`Unblocking ${ip}...`, 'info');
+    showToast(`Unblocking ${mac}...`, 'info');
 
-    fetch(`/api/unblock/${ip}`)
+    fetch(`/api/devices/${mac}/block`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ blocked: false })  // blocked: false = unblock
+    })
       .then(r => r.json())
       .then(result => {
         if (result.success) {
-          showToast(`${ip} has been unblocked!`, 'success');
+          showToast(`${mac} has been unblocked!`, 'success');
           refreshDevices();
         } else {
           showToast(`Failed: ${result.message}`, 'error');
@@ -166,7 +194,7 @@
       .catch(() => showToast('Unblock request failed', 'error'));
   }
 
-  // ── Render Table (used by auto-refresh) ──
+  // ── Render Table (used by auto-refresh and live search) ──
   function renderTable(devices) {
     const tbody = document.getElementById('device-table-body');
 
@@ -184,15 +212,16 @@
     tbody.innerHTML = '';
 
     devices.forEach((device, index) => {
-      const isYou      = device.is_me;
-      const isGateway  = device.is_gateway;
-      const isBlocked  = device.blocked;
+      const isYou       = device.is_me;
+      const isGateway   = device.is_gateway;
+
+      // ✦ BUG FIX: was reading  device.blocked  which is undefined — the API
+      //   returns  is_blocked  (matching the DB column name).
+      const isBlocked   = device.is_blocked;
+
       const isProtected = isYou || isGateway;
 
-      // Clean hostname — remove "(You)" label
-      const name = device.hostname.replace('(You)', '').trim();
-
-      // Status badge
+      // Status badge HTML
       const statusBadge = isBlocked
         ? `<span class="badge badge-warning"><span class="badge-dot"></span>Blocked</span>`
         : isGateway
@@ -202,22 +231,24 @@
            </span>`
         : `<span class="badge badge-online"><span class="badge-dot"></span>Online</span>`;
 
-      // Action button
+      // Action button HTML
+      // ✦ BUG FIX: onclick passes device.mac (not device.ip) to match the
+      //   corrected blockDevice() / unblockDevice() functions above.
       const actionBtn = isProtected
         ? `<span style="color:var(--text-muted);font-size:12px;">🔒 Protected</span>`
         : isBlocked
         ? `<button class="btn btn-outline" style="padding:5px 12px;font-size:12px;"
-             onclick="unblockDevice('${device.ip}')">✅ Unblock</button>`
+             onclick="unblockDevice('${device.mac}')">✅ Unblock</button>`
         : `<button class="btn" style="padding:5px 12px;font-size:12px;
              background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger);"
-             onclick="blockDevice('${device.ip}')">🚫 Block</button>`;
+             onclick="blockDevice('${device.mac}')">🚫 Block</button>`;
 
       tbody.innerHTML += `
         <tr>
           <td class="td-mono" style="color:var(--text-muted);">${index + 1}</td>
           <td class="td-mono">${device.ip}</td>
           <td class="td-hostname">
-            ${name}
+            ${device.hostname}
             ${isYou ? '<span class="you-badge">YOU</span>' : ''}
           </td>
           <td class="td-mono">${device.mac}</td>
@@ -230,47 +261,52 @@
   // ── Refresh Devices from API ──
   function refreshDevices(manual = false) {
     const progress = document.getElementById('scan-progress');
-    const btn = document.getElementById('refresh-btn');
+    const btn      = document.getElementById('refresh-btn');
 
     // Show scanning state
     progress.classList.add('active');
     btn.classList.add('spinning');
     btn.innerHTML = '<span class="btn-icon">🔄</span> Scanning...';
-    btn.disabled = true;
+    btn.disabled  = true;
 
     fetch('/api/devices')
       .then(r => r.json())
-      .then(devices => {
-        allDevices = devices;
-        renderTable(devices);
+      // ✦ BUG FIX: the API returns  { "success": true, "devices": [...], "count": N }
+      //   but the old code did  allDevices = devices  and  renderTable(devices)
+      //   treating the whole response object as the array.
+      //   Fix: destructure  data.devices  from the response wrapper object.
+      .then(data => {
+        allDevices = data.devices;   // Store full list for live search filtering
+        renderTable(data.devices);
 
         const now = new Date();
         document.getElementById('last-updated').textContent =
           'Updated at ' + now.toLocaleTimeString();
 
-        // Reset UI
+        // Reset UI state
         progress.classList.remove('active');
         btn.classList.remove('spinning');
         btn.innerHTML = '<span class="btn-icon">🔄</span> Scan Now';
-        btn.disabled = false;
-        countdown = 30;
+        btn.disabled  = false;
+        countdown     = 30;
 
-        if (manual) showToast(`Found ${devices.length} devices`, 'success');
+        if (manual) showToast(`Found ${data.devices.length} devices`, 'success');
       })
       .catch(() => {
         progress.classList.remove('active');
         btn.classList.remove('spinning');
         btn.innerHTML = '<span class="btn-icon">🔄</span> Scan Now';
-        btn.disabled = false;
+        btn.disabled  = false;
         showToast('Scan failed. Check connection.', 'error');
       });
   }
 
   // ── Live Search Filter ──
+  // Filters the in-memory allDevices array — no extra API call needed
   document.getElementById('search-input').addEventListener('input', function() {
-    const query = this.value.toLowerCase();
+    const query    = this.value.toLowerCase();
     const filtered = allDevices.filter(d =>
-      d.ip.toLowerCase().includes(query) ||
+      d.ip.toLowerCase().includes(query)       ||
       d.hostname.toLowerCase().includes(query) ||
       d.mac.toLowerCase().includes(query)
     );
@@ -283,6 +319,7 @@
   }
 
   // ── Auto Countdown + Refresh ──
+  // Counts down every second and triggers a refresh when it reaches 0
   setInterval(() => {
     countdown--;
     if (countdown <= 0) {
@@ -293,7 +330,8 @@
       `Next auto-scan in ${countdown}s`;
   }, 1000);
 
-  // ── Load devices on page start ──
+  // ── Initial load ──
+  // Fetch and render devices immediately when the page first loads
   refreshDevices();
 </script>
 {% endblock %}
